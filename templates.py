@@ -51,7 +51,7 @@ HTML_PAGE = """
     <div class="modal" id="md">
         <div class="modal-content">
             <h3 style="margin-bottom:20px;">同步设置</h3>
-            <div class="row"><span>发送延迟(ms)</span><input type="number" id="dly" value="300" style="width:60px"></div>
+            <div class="row"><span>发送延迟(ms)</span><input type="number" id="dly" value="150" style="width:60px"></div>
             <div class="row"><span>15s 自动消失</span><input type="checkbox" id="auto_clr"></div>
             <div class="row"><span>智能感知重置</span><input type="checkbox" id="kb" checked></div>
             <button class="close-btn" onclick="closeM()">完成</button>
@@ -63,44 +63,71 @@ HTML_PAGE = """
               dot = document.getElementById('dot'), count = document.getElementById('count'),
               st_detail = document.getElementById('st_detail');
         let ws, lastText = '', total = 0, ignoreLen = 0, timer, autoClearTimer;
+        let isConnected = false, allowReconnect = true, reconnectTimer;
 
         function openM(){ document.getElementById('md').style.display='flex'; }
         function closeM(){ document.getElementById('md').style.display='none'; syncCfg(); }
         
         function syncCfg(){ 
-            if(ws?.readyState===1) ws.send(JSON.stringify({
+            if(ws?.readyState===1 && isConnected) ws.send(JSON.stringify({
                 type:'config', 
                 detectKeyboard:document.getElementById('kb').checked
             })); 
         }
         
         function connect(){
+            clearTimeout(reconnectTimer);
+            if (ws && ws.readyState <= 1) {
+                try { ws.close(); } catch (_) {}
+            }
+            isConnected = false;
             ws = new WebSocket(`ws://${location.host}/ws`);
-            ws.onopen = () => { st.innerText='已连接'; dot.className='status-dot on'; syncCfg(); };
-            ws.onclose = () => { st.innerText='已断开'; dot.className='status-dot'; setTimeout(connect, 2000); };
             ws.onmessage = (e) => {
                 const d = JSON.parse(e.data);
+                if (d.type === 'connect') {
+                    if (d.ok) {
+                        isConnected = true;
+                        allowReconnect = true;
+                        st.innerText = '已连接';
+                        dot.className = 'status-dot on';
+                        syncCfg();
+                    } else {
+                        st.innerText = d.reason === 'occupied' ? '已有设备连接' : '连接失败';
+                        dot.className = 'status-dot';
+                    }
+                    return;
+                }
+                if (d.type === 'kicked') {
+                    isConnected = false;
+                    allowReconnect = d.reason === 'server_restart';
+                    st.innerText = d.reason === 'server_restart' ? '服务已重启，重连中...' : '电脑端已断开';
+                    dot.className = 'status-dot';
+                    return;
+                }
                 if(d.type==='rebase'){ 
-                    // 【关键实现】锁定当前输入框长度，防止退格返回上一段
                     ignoreLen = tx.value.length; 
                     lastText = ''; 
                     st_detail.innerText='电脑端操作中：本段已锁定'; 
                     setTimeout(()=>st_detail.innerText='实时同步中', 1500); 
                 } else if (d.type === 'config') {
-                    // 【新增】收到热更新，直接修改手机页面的复选框和清空时间
                     document.getElementById('auto_clr').checked = d.autoClear;
                     window.autoClearTime = d.autoClearTime * 1000;
                 }
             };
+            ws.onclose = () => {
+                isConnected = false;
+                st.innerText = '已断开';
+                dot.className = 'status-dot';
+                if (allowReconnect) reconnectTimer = setTimeout(connect, 2000);
+            };
         }
 
         tx.oninput = () => {
-            // 1. 计算当前有效段落并发送
             clearTimeout(timer);
             timer = setTimeout(() => {
                 const effective = tx.value.substring(ignoreLen);
                 if(effective === lastText) return;
-                if(ws?.readyState===1){
+                if(ws?.readyState===1 && isConnected){
                     ws.send(JSON.stringify({type:'diff', oldText:lastText, newText:effective}));
                     total += (effective.length - lastText.length);
                     count.innerText = `已同步 ${total} 字`;
@@ -108,7 +135,6 @@ HTML_PAGE = """
                 }
             }, document.getElementById('dly').value);
 
-            // 2. 自动消失计时
             clearTimeout(autoClearTimer);
             if(document.getElementById('auto_clr').checked) {
                 autoClearTimer = setTimeout(() => {
@@ -120,7 +146,7 @@ HTML_PAGE = """
         function clearText(manual){ 
             if(manual && !confirm('确定要清空手机界面吗？')) return;
             tx.value=''; lastText=''; ignoreLen=0; 
-            if(ws?.readyState===1) ws.send(JSON.stringify({type:'reset'})); 
+            if(ws?.readyState===1 && isConnected) ws.send(JSON.stringify({type:'reset'})); 
             st_detail.innerText = manual ? '已手动复位' : '已自动复位';
             setTimeout(()=>st_detail.innerText='实时同步中', 1500);
         }

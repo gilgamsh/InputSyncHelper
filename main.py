@@ -52,6 +52,9 @@ class DesktopApp:
         
         self.status = ttk.Label(content, text="● 等待手机连接...", foreground="red", font=("Arial", 10, "bold"))
         self.status.pack(pady=10)
+
+        self.disconnect_btn = ttk.Button(content, text="断开手机", command=self.disconnect_phone, state='disabled')
+        self.disconnect_btn.pack(pady=5)
         
         ttk.Separator(content, orient='horizontal').pack(fill='x', pady=10)
         
@@ -171,11 +174,20 @@ class DesktopApp:
         self.tk_qr = ImageTk.PhotoImage(img)
         self.qr_label.config(image=self.tk_qr)
 
+    def disconnect_phone(self):
+        """主动断开已连接的手机"""
+        if server.disconnect_client(kicked=True):
+            self._update_connection_ui("● 等待手机连接...", "red", False)
+
     def update_st_callback(self, connected):
         """供后端调用的状态更新"""
         color = "#28a745" if connected else "red"
         text = "● 📱 手机已连接" if connected else "● 等待手机连接..."
-        self.root.after(0, lambda: self.status.config(text=text, foreground=color))
+        self.root.after(0, lambda c=connected, t=text, col=color: self._update_connection_ui(t, col, c))
+
+    def _update_connection_ui(self, text, color, connected):
+        self.status.config(text=text, foreground=color)
+        self.disconnect_btn.config(state='normal' if connected else 'disabled')
 
     def create_tray(self):
         img = Image.new('RGB', (64, 64), (0, 122, 255))
@@ -211,7 +223,7 @@ class DesktopApp:
             # 只有改了 IP 或 端口，才需要重启服务器
             new_ip = self.ip_entry.get()
             new_port = int(self.port_entry.get())
-            old_ip = utils.get_port_info()['ip']
+            old_ip = utils.get_ip()
             old_port = utils.get_port()
 
             if new_ip != old_ip or new_port != old_port:
@@ -236,20 +248,19 @@ class DesktopApp:
         """重启服务器以应用新的设置"""
         global server_thread, server_loop
         
+        self._update_connection_ui("● 等待手机连接...", "red", False)
+        
         try:
-            # 停止当前服务器
-            if server_loop and server_loop.is_running():
-                server_loop.call_soon_threadsafe(server_loop.stop)
-                
-            # 等待服务器线程结束
+            server.shutdown_server(notify=True, stop_loop=True)
             if server_thread:
-                server_thread.join(timeout=3)
-                
-            # 关闭旧的事件循环
-            if server_loop:
+                server_thread.join(timeout=5)
+            if server_loop and not server_loop.is_closed():
                 server_loop.close()
         except Exception as e:
             print(f"停止服务器时出错：{e}")
+        
+        server_thread = None
+        server_loop = None
         
         # 增加延迟时间，确保端口完全释放
         time.sleep(2.0)
@@ -266,10 +277,12 @@ class DesktopApp:
             
             # 等待服务器启动完成
             time.sleep(0.5)
+            self._update_connection_ui("● 等待手机连接...", "red", False)
         except OSError as e:
             print(f"启动服务器失败：{e}")
             self.status.config(text=f"● 端口被占用，请更换端口", foreground="red")
-            self.root.after(3000, lambda: self.status.config(text="● 等待手机连接...", foreground="red"))
+            self.disconnect_btn.config(state='disabled')
+            self.root.after(3000, lambda: self._update_connection_ui("● 等待手机连接...", "red", False))
 
     def quit_all(self): 
         self.icon.stop()
