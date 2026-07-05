@@ -55,6 +55,43 @@
    - 清空时间：自动清空的时间（秒）
    设置保存后会自动应用并重启服务器。
 
+### 从源码运行（uv，推荐）
+
+适合开发者或想直接跑最新代码的用户。项目依赖在 `requirements.txt`，用 [uv](https://docs.astral.sh/uv/) 可以快速配环境。
+
+**1. 安装 uv（Windows PowerShell，只需一次）**
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+安装后**新开一个终端**，确认：`uv --version`
+
+**2. 进入项目目录，创建环境并安装依赖**
+
+```powershell
+cd InputSyncHelper
+uv venv --python 3.10
+.\.venv\Scripts\Activate.ps1
+uv pip install -r requirements.txt
+```
+
+**3. 启动**
+
+```powershell
+python main.py
+```
+
+**一条命令直接跑（不用手动 activate）**
+
+```powershell
+uv run --python 3.10 --with-requirements requirements.txt python main.py
+```
+
+启动后流程与安装版相同：电脑显示二维码 → 手机同 Wi-Fi 扫码 → 即可输入同步。
+
+> 用户配置会写入 `%APPDATA%\InputSyncHelper\settings.json`，与 Release 安装版一致。
+
 ---
 
 ## 注意事项
